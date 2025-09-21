@@ -1,0 +1,37 @@
+{
+  "capture": {
+    "title": "チャート解析",
+    "upload": "写真をアップロード",
+    "analyzing": "解析中...",
+    "recalculate": "再計算",
+    "education": "このシグナルは教育目的であり、投資助言ではありません。"
+  },
+  "chat": {
+    "title": "AIアドバイス",
+    "placeholder": "質問を入力（例：SPYのリスクは？）"
+  },
+  "nav": {
+    "title": "銘柄ナビ",
+    "popular": "人気",
+    "etf": "おすすめETF",
+    "buy": "買い時候補"
+  },
+  "nisa": {
+    "title": "NISAサポート",
+    "overview": "制度の概要",
+    "qa": "よくある質問",
+    "steps": "学習ステップ",
+    "simulator": "簡易シミュレーション"
+  },
+  "settings": {
+    "title": "設定",
+    "openai": "OpenAI APIキー",
+    "alpha": "Alpha Vantage APIキー",
+    "mode": "分析モード",
+    "theme": "テーマ",
+    "disclaimer": "免責へ同意する",
+    "save": "保存",
+    "long": "長期",
+    "swing": "スイング"
+  }
+}
