@@ -32,6 +32,14 @@
     "disclaimer": "免責へ同意する",
     "save": "保存",
     "long": "長期",
-    "swing": "スイング"
+    "swing": "スイング",
+    "thresholds": {
+      "title": "スコア閾値",
+      "description": "BUY/SELL 判定に用いるスコアの閾値を設定します（-10〜+10、0.1刻み）",
+      "longBuy": "長期 BUY閾値",
+      "longSell": "長期 SELL閾値",
+      "swingBuy": "スイング BUY閾値",
+      "swingSell": "スイング SELL閾値"
+    }
   }
 }
