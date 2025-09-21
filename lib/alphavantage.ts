@@ -9,6 +9,8 @@ import type {
 
 const BASE_URL = 'https://www.alphavantage.co/query';
 const cache = new TTLCache<any>(15 * 60 * 1000);
+const listingsCache = new TTLCache<string[]>(24 * 60 * 60 * 1000);
+const listingsFallback = new Map<string, string[]>();
 
 async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -113,8 +115,29 @@ export async function fetchSymbolSearch(keyword: string, apiKey?: string) {
 }
 
 export async function fetchListings(apiKey?: string): Promise<string[]> {
-  const csv = await requestAlpha('LISTING_STATUS', { state: 'active' }, apiKey);
-  if (typeof csv !== 'string') return [];
-  const lines = csv.trim().split('\n');
-  return lines.slice(1).map((line) => line.split(',')[0]);
+  const cacheKey = apiKey ?? 'default';
+  const cached = listingsCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const csv = await requestAlpha('LISTING_STATUS', { state: 'active' }, apiKey);
+    if (typeof csv !== 'string') {
+      throw new Error('Alpha Vantage listing response was not CSV');
+    }
+    const lines = csv.trim().split('\n');
+    const listings = lines
+      .slice(1)
+      .map((line) => line.split(',')[0])
+      .filter((symbol) => Boolean(symbol));
+    listingsCache.set(cacheKey, listings);
+    listingsFallback.set(cacheKey, listings);
+    return listings;
+  } catch (error) {
+    const fallback = listingsFallback.get(cacheKey);
+    if (fallback) {
+      console.warn('Alpha Vantage listing request failed, using fallback cache', error);
+      return fallback;
+    }
+    throw error;
+  }
 }
