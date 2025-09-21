@@ -12,6 +12,8 @@ async function callResponses<T>(
   payload: Record<string, unknown>,
   { apiKey, expectsJson = true }: CallResponsesOptions = {}
 ): Promise<T> {
+=======
+async function callResponses<T>(payload: Record<string, unknown>, apiKey?: string): Promise<T> {
   noStore();
   const key = apiKey ?? process.env.OPENAI_API_KEY;
   if (!key) {
@@ -55,6 +57,12 @@ async function callResponses<T>(
   } catch (error) {
     throw new Error(`OpenAIのJSON応答を解析できません: ${(error as Error).message}`);
   }
+=======
+  const output = data.output?.[0]?.content?.[0]?.text ?? data.output?.[0]?.content?.[0]?.json;
+  if (!output) {
+    throw new Error('OpenAI応答が不正です');
+  }
+  return typeof output === 'string' ? (JSON.parse(output) as T) : (output as T);
 }
 
 export async function analyzePhoto({
@@ -153,6 +161,8 @@ export async function analyzePhoto({
       response_format: { type: 'json_schema', json_schema: { name: 'chart_payload', schema } }
     },
     { apiKey, expectsJson: true }
+=======
+    apiKey
   );
 }
 
@@ -209,6 +219,8 @@ export async function formatAdvice({
       response_format: { type: 'json_schema', json_schema: { name: 'advice_payload', schema } }
     },
     { apiKey, expectsJson: true }
+=======
+    apiKey
   );
 }
 
@@ -251,4 +263,8 @@ export async function chatEducator({
     { apiKey, expectsJson: false }
   );
   return response?.trim() ? response : '申し訳ありません、回答を生成できませんでした。';
+=======
+    apiKey
+  );
+  return response;
 }
