@@ -6,16 +6,44 @@ import type { AlphaDailyPoint, AlphaMonthlyPoint, EtfProfile, OverviewProfile } 
 
 export async function POST(request: Request) {
   try {
-    const { dailies, monthlies, profile, overview, mode } = await request.json();
+    const { dailies, monthlies, profile, overview, mode, timeframeMonths, priceScale } = await request.json();
     if (!Array.isArray(dailies) || !Array.isArray(monthlies)) {
       return NextResponse.json({ error: 'series are required' }, { status: 400 });
     }
-    const indicators = buildIndicatorSet(dailies as AlphaDailyPoint[], monthlies as AlphaMonthlyPoint[]);
-    const anomalies = detectAnomalies(dailies as AlphaDailyPoint[]);
+    const rawDailies = dailies as AlphaDailyPoint[];
+    const monthlyPoints = monthlies as AlphaMonthlyPoint[];
+    const normalizedMonths =
+      typeof timeframeMonths === 'number' && Number.isFinite(timeframeMonths)
+        ? Math.min(60, Math.max(1, Math.round(timeframeMonths)))
+        : null;
+    const normalizedScale: 'linear' | 'log' = priceScale === 'log' ? 'log' : 'linear';
+
+    let workingDailies = rawDailies;
+    if (normalizedMonths) {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - normalizedMonths);
+      const filtered = rawDailies.filter((point) => {
+        const date = new Date(point.date);
+        return !Number.isNaN(date.getTime()) && date >= cutoff;
+      });
+      if (filtered.length >= 10) {
+        workingDailies = filtered;
+      }
+    }
+
+    if (normalizedScale === 'log') {
+      const filtered = workingDailies.filter((point) => point.adjustedClose > 0);
+      if (filtered.length >= 10) {
+        workingDailies = filtered;
+      }
+    }
+
+    const indicators = buildIndicatorSet(workingDailies, monthlyPoints);
+    const anomalies = detectAnomalies(workingDailies);
     const result = decide({
       metrics: indicators,
-      dailies,
-      monthlies,
+      dailies: workingDailies,
+      monthlies: monthlyPoints,
       mode: mode === 'swing' ? 'swing' : 'long',
       profile: (profile ?? null) as EtfProfile | null,
       overview: (overview ?? null) as OverviewProfile | null,
