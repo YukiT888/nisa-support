@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { Card } from '@/components/Card';
 import { useAppSettings } from '@/lib/useAppSettings';
 import { DEFAULT_THRESHOLDS, DISCLAIMER } from '@/lib/constants';
@@ -8,6 +8,9 @@ import type { AppSettings } from '@/lib/types';
 import ja from '@/public/i18n/ja.json';
 
 const t = ja.settings;
+
+type Horizon = keyof typeof DEFAULT_THRESHOLDS;
+type ThresholdType = keyof (typeof DEFAULT_THRESHOLDS)['long'];
 
 export default function SettingsPage() {
   const { settings, setSettings, ready } = useAppSettings();
@@ -17,11 +20,132 @@ export default function SettingsPage() {
     theme: 'system',
     acceptedDisclaimer: false
   });
+  const [thresholdInputs, setThresholdInputs] = useState({
+    long: {
+      buy: DEFAULT_THRESHOLDS.long.buy.toString(),
+      sell: DEFAULT_THRESHOLDS.long.sell.toString()
+    },
+    swing: {
+      buy: DEFAULT_THRESHOLDS.swing.buy.toString(),
+      sell: DEFAULT_THRESHOLDS.swing.sell.toString()
+    }
+  });
   const [status, setStatus] = useState<string | null>(null);
+
+  const clampThreshold = (value: number) => Math.max(-10, Math.min(10, value));
+
+  const handleThresholdChange = (horizon: Horizon, thresholdType: ThresholdType) =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const target = event.currentTarget;
+      const rawValue = target.value;
+
+      setThresholdInputs((prev) => ({
+        ...prev,
+        [horizon]: {
+          ...prev[horizon],
+          [thresholdType]: rawValue
+        }
+      }));
+
+      if (rawValue === '' || rawValue === '-' || rawValue === '+') {
+        return;
+      }
+
+      const numericValue = Number(rawValue);
+      if (Number.isNaN(numericValue)) {
+        return;
+      }
+
+      const clamped = clampThreshold(numericValue);
+      setLocal((prev) => ({
+        ...prev,
+        thresholds: {
+          ...prev.thresholds,
+          [horizon]: {
+            ...prev.thresholds[horizon],
+            [thresholdType]: clamped
+          }
+        }
+      }));
+
+      if (clamped !== numericValue) {
+        setThresholdInputs((prev) => ({
+          ...prev,
+          [horizon]: {
+            ...prev[horizon],
+            [thresholdType]: clamped.toString()
+          }
+        }));
+      }
+    };
+
+  const handleThresholdBlur = (horizon: Horizon, thresholdType: ThresholdType) => () => {
+    setThresholdInputs((prev) => {
+      const current = prev[horizon][thresholdType];
+      const fallback = local.thresholds[horizon][thresholdType];
+
+      if (current === '' || current === '-' || current === '+') {
+        return {
+          ...prev,
+          [horizon]: {
+            ...prev[horizon],
+            [thresholdType]: fallback.toString()
+          }
+        };
+      }
+
+      const numericValue = Number(current);
+      if (Number.isNaN(numericValue)) {
+        return {
+          ...prev,
+          [horizon]: {
+            ...prev[horizon],
+            [thresholdType]: fallback.toString()
+          }
+        };
+      }
+
+      const clamped = clampThreshold(numericValue);
+
+      setLocal((prevLocal) => {
+        if (prevLocal.thresholds[horizon][thresholdType] === clamped) {
+          return prevLocal;
+        }
+        return {
+          ...prevLocal,
+          thresholds: {
+            ...prevLocal.thresholds,
+            [horizon]: {
+              ...prevLocal.thresholds[horizon],
+              [thresholdType]: clamped
+            }
+          }
+        };
+      });
+
+      return {
+        ...prev,
+        [horizon]: {
+          ...prev[horizon],
+          [thresholdType]: clamped.toString()
+        }
+      };
+    });
+  };
 
   useEffect(() => {
     if (ready) {
       setLocal(settings);
+      setThresholdInputs({
+        long: {
+          buy: settings.thresholds.long.buy.toString(),
+          sell: settings.thresholds.long.sell.toString()
+        },
+        swing: {
+          buy: settings.thresholds.swing.buy.toString(),
+          sell: settings.thresholds.swing.sell.toString()
+        }
+      });
     }
   }, [ready, settings]);
 
@@ -82,6 +206,68 @@ export default function SettingsPage() {
                 onChange={() => setLocal((prev) => ({ ...prev, mode: 'swing' }))}
               />
               {t.swing}
+            </label>
+          </div>
+        </Card>
+        <Card className="space-y-3 text-sm">
+          <h3 className="text-base font-semibold text-kachi-accent">{t.thresholds.title}</h3>
+          <p className="text-xs text-white/60">{t.thresholds.description}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-white/60">{t.thresholds.longBuy}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={-10}
+                max={10}
+                step={0.1}
+                value={thresholdInputs.long.buy}
+                onChange={handleThresholdChange('long', 'buy')}
+                onBlur={handleThresholdBlur('long', 'buy')}
+                className="rounded-xl border border-white/10 bg-white/10 p-2 text-sm text-white focus:border-kachi-accent focus:outline-none focus:ring-2 focus:ring-kachi-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-white/60">{t.thresholds.longSell}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={-10}
+                max={10}
+                step={0.1}
+                value={thresholdInputs.long.sell}
+                onChange={handleThresholdChange('long', 'sell')}
+                onBlur={handleThresholdBlur('long', 'sell')}
+                className="rounded-xl border border-white/10 bg-white/10 p-2 text-sm text-white focus:border-kachi-accent focus:outline-none focus:ring-2 focus:ring-kachi-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-white/60">{t.thresholds.swingBuy}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={-10}
+                max={10}
+                step={0.1}
+                value={thresholdInputs.swing.buy}
+                onChange={handleThresholdChange('swing', 'buy')}
+                onBlur={handleThresholdBlur('swing', 'buy')}
+                className="rounded-xl border border-white/10 bg-white/10 p-2 text-sm text-white focus:border-kachi-accent focus:outline-none focus:ring-2 focus:ring-kachi-accent"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-white/60">{t.thresholds.swingSell}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={-10}
+                max={10}
+                step={0.1}
+                value={thresholdInputs.swing.sell}
+                onChange={handleThresholdChange('swing', 'sell')}
+                onBlur={handleThresholdBlur('swing', 'sell')}
+                className="rounded-xl border border-white/10 bg-white/10 p-2 text-sm text-white focus:border-kachi-accent focus:outline-none focus:ring-2 focus:ring-kachi-accent"
+              />
             </label>
           </div>
         </Card>
