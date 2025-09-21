@@ -9,6 +9,7 @@ import { ChartCanvas } from '@/components/ChartCanvas';
 import { useAppSettings } from '@/lib/useAppSettings';
 import { DISCLAIMER } from '@/lib/constants';
 import type { AdvicePayload, PhotoAnalysis, ScoreResult } from '@/lib/types';
+import { processImageFile } from '@/lib/imageProcessing';
 import ja from '@/public/i18n/ja.json';
 
 const t = ja.capture;
@@ -30,13 +31,21 @@ export default function CapturePage() {
   const [symbol, setSymbol] = useState<string | null>(null);
 
   const handleFile = async (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setPreview(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      setError(null);
+      setPreview(null);
+      setAnalysis(null);
+      setScore(null);
+      setAdvice(null);
+      setChart([]);
+      setSymbol(null);
+
+      const processed = await processImageFile(file);
+      setPreview(processed.dataUrl);
+    } catch (err) {
+      console.error(err);
+      setError('画像の処理中に問題が発生しました');
+    }
   };
 
   const handleAnalyze = async () => {
