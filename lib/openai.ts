@@ -3,6 +3,16 @@ import type { AdvicePayload, PhotoAnalysis } from '@/lib/types';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
+interface CallResponsesOptions {
+  apiKey?: string;
+  expectsJson?: boolean;
+}
+
+async function callResponses<T>(
+  payload: Record<string, unknown>,
+  { apiKey, expectsJson = true }: CallResponsesOptions = {}
+): Promise<T> {
+=======
 async function callResponses<T>(payload: Record<string, unknown>, apiKey?: string): Promise<T> {
   noStore();
   const key = apiKey ?? process.env.OPENAI_API_KEY;
@@ -24,6 +34,30 @@ async function callResponses<T>(payload: Record<string, unknown>, apiKey?: strin
   }
 
   const data = await response.json();
+  const firstMessage = data.output?.[0]?.content?.[0];
+  if (!firstMessage) {
+    throw new Error('OpenAI応答が不正です');
+  }
+
+  if ('json' in firstMessage && firstMessage.json) {
+    return firstMessage.json as T;
+  }
+
+  const textPayload = 'text' in firstMessage ? firstMessage.text : undefined;
+  if (typeof textPayload !== 'string') {
+    throw new Error('OpenAI応答が不正です');
+  }
+
+  if (!expectsJson) {
+    return textPayload as unknown as T;
+  }
+
+  try {
+    return JSON.parse(textPayload) as T;
+  } catch (error) {
+    throw new Error(`OpenAIのJSON応答を解析できません: ${(error as Error).message}`);
+  }
+=======
   const output = data.output?.[0]?.content?.[0]?.text ?? data.output?.[0]?.content?.[0]?.json;
   if (!output) {
     throw new Error('OpenAI応答が不正です');
@@ -126,6 +160,8 @@ export async function analyzePhoto({
       ],
       response_format: { type: 'json_schema', json_schema: { name: 'chart_payload', schema } }
     },
+    { apiKey, expectsJson: true }
+=======
     apiKey
   );
 }
@@ -182,6 +218,8 @@ export async function formatAdvice({
       ],
       response_format: { type: 'json_schema', json_schema: { name: 'advice_payload', schema } }
     },
+    { apiKey, expectsJson: true }
+=======
     apiKey
   );
 }
@@ -222,6 +260,10 @@ export async function chatEducator({
         }
       ]
     },
+    { apiKey, expectsJson: false }
+  );
+  return response?.trim() ? response : '申し訳ありません、回答を生成できませんでした。';
+=======
     apiKey
   );
   return response;
