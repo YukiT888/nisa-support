@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F2540" />
+      <stop offset="100%" stop-color="#163253" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)" />
+  <g fill="none" stroke="#C7A66B" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 320c48-80 208-80 256 0" />
+    <path d="M160 208h56l40-64 40 128 32-64h64" />
+  </g>
+  <circle cx="168" cy="192" r="16" fill="#6BA4FF" />
+  <circle cx="344" cy="320" r="18" fill="#6BA4FF" />
+  <text x="256" y="404" text-anchor="middle" font-family="'K2D', 'Noto Sans JP', sans-serif" font-size="72" font-weight="700" fill="#F2F5FA">NISA</text>
+</svg>
