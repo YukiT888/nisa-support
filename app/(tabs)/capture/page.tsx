@@ -8,11 +8,78 @@ import { Card } from '@/components/Card';
 import { ChartCanvas } from '@/components/ChartCanvas';
 import { useAppSettings } from '@/lib/useAppSettings';
 import { DISCLAIMER } from '@/lib/constants';
-import type { AdvicePayload, PhotoAnalysis, ScoreResult } from '@/lib/types';
+import type {
+  AdvicePayload,
+  AlphaDailyPoint,
+  AlphaMonthlyPoint,
+  PhotoAnalysis,
+  ScoreResult
+} from '@/lib/types';
 import { processImageFile } from '@/lib/imageProcessing';
 import ja from '@/public/i18n/ja.json';
 
 const t = ja.capture;
+
+const TIMEFRAME_MIN = 1;
+const TIMEFRAME_MAX = 36;
+
+function clampTimeframe(value: number) {
+  if (!Number.isFinite(value)) return TIMEFRAME_MIN;
+  return Math.min(TIMEFRAME_MAX, Math.max(TIMEFRAME_MIN, Math.round(value)));
+}
+
+function deriveMonthsFromAnalysisTimeframe(timeframe?: string | null) {
+  if (!timeframe) return null;
+  const normalized = timeframe.trim();
+  if (!normalized) return null;
+  const directMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(d|day|days|w|week|weeks|m|month|months|y|yr|year|years)/i);
+  const compactMatch = normalized.match(/(\d+(?:\.\d+)?)([dwmy])/i);
+  const match = directMatch ?? compactMatch;
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const unit = (match[2] ?? '').toLowerCase();
+  let months = value;
+  if (unit.startsWith('d')) {
+    months = value / 30;
+  } else if (unit.startsWith('w')) {
+    months = (value * 7) / 30;
+  } else if (unit.startsWith('y')) {
+    months = value * 12;
+  }
+  return clampTimeframe(months);
+}
+
+function deriveScaleFromAnalysisScale(scale?: string | null): 'linear' | 'log' | null {
+  if (!scale) return null;
+  return scale.toLowerCase().includes('log') ? 'log' : 'linear';
+}
+
+function filterDailiesByMonths(dailies: AlphaDailyPoint[], months: number) {
+  const monthsClamped = clampTimeframe(months);
+  const start = new Date();
+  start.setMonth(start.getMonth() - monthsClamped);
+  const filtered = dailies.filter((point) => {
+    const date = new Date(point.date);
+    return !Number.isNaN(date.getTime()) && date >= start;
+  });
+  return filtered.length >= 10 ? filtered : dailies;
+}
+
+function formatChartTypeLabel(type: PhotoAnalysis['chart_type']) {
+  switch (type) {
+    case 'line':
+      return 'ラインチャート';
+    case 'area':
+      return 'エリアチャート';
+    case 'candlestick':
+      return 'ローソク足';
+    case 'bar':
+      return 'バーチャート';
+    default:
+      return '不明なチャート';
+  }
+}
 
 interface ChartPoint {
   timestamp: number;
@@ -29,6 +96,22 @@ export default function CapturePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [symbol, setSymbol] = useState<string | null>(null);
+  const [timeframeMonths, setTimeframeMonths] = useState(() => clampTimeframe(6));
+  const [priceScale, setPriceScale] = useState<'linear' | 'log'>('linear');
+  const [analysisTimeframe, setAnalysisTimeframe] = useState<number | null>(null);
+  const [analysisScale, setAnalysisScale] = useState<'linear' | 'log' | null>(null);
+  const [paramsDirty, setParamsDirty] = useState(false);
+
+  const syncDirty = (
+    nextMonths: number,
+    nextScale: 'linear' | 'log',
+    baseMonths?: number | null,
+    baseScale?: 'linear' | 'log' | null
+  ) => {
+    const fallbackMonths = baseMonths ?? analysisTimeframe ?? clampTimeframe(6);
+    const fallbackScale = baseScale ?? analysisScale ?? 'linear';
+    setParamsDirty(nextMonths !== fallbackMonths || nextScale !== fallbackScale);
+  };
 
   const handleFile = async (file: File) => {
     try {
@@ -39,6 +122,12 @@ export default function CapturePage() {
       setAdvice(null);
       setChart([]);
       setSymbol(null);
+      const defaultMonths = clampTimeframe(6);
+      setTimeframeMonths(defaultMonths);
+      setPriceScale('linear');
+      setAnalysisTimeframe(null);
+      setAnalysisScale(null);
+      syncDirty(defaultMonths, 'linear', defaultMonths, 'linear');
 
       const processed = await processImageFile(file);
       setPreview(processed.dataUrl);
@@ -50,6 +139,8 @@ export default function CapturePage() {
 
   const handleAnalyze = async () => {
     if (!preview || !ready) return;
+    const clamped = clampTimeframe(timeframeMonths);
+    setTimeframeMonths(clamped);
     setLoading(true);
     setError(null);
     try {
@@ -66,11 +157,20 @@ export default function CapturePage() {
       if (!analyzeRes.ok) throw new Error(await analyzeRes.text());
       const analyzeJson = await analyzeRes.json();
       const resolvedSymbol = analyzeJson.resolvedSymbol as string | null;
-      setAnalysis(analyzeJson.photo as PhotoAnalysis);
+      const nextAnalysis = analyzeJson.photo as PhotoAnalysis;
+      setAnalysis(nextAnalysis);
       setSymbol(resolvedSymbol);
       if (!resolvedSymbol) {
         throw new Error('銘柄を特定できませんでした');
       }
+
+      const derivedTimeframe = deriveMonthsFromAnalysisTimeframe(nextAnalysis.timeframe) ?? clamped;
+      const derivedScale = deriveScaleFromAnalysisScale(nextAnalysis.x_axis?.scale) ?? priceScale;
+      setAnalysisTimeframe(derivedTimeframe);
+      setAnalysisScale(derivedScale);
+      setTimeframeMonths(derivedTimeframe);
+      setPriceScale(derivedScale);
+      syncDirty(derivedTimeframe, derivedScale, derivedTimeframe, derivedScale);
 
       const alphaKey = settings.alphaVantageApiKey ? `&apiKey=${encodeURIComponent(settings.alphaVantageApiKey)}` : '';
       const [dailyRes, monthlyRes, overviewRes, etfRes] = await Promise.all([
@@ -83,12 +183,16 @@ export default function CapturePage() {
       if (!dailyRes.ok) throw new Error(await dailyRes.text());
       if (!monthlyRes.ok) throw new Error(await monthlyRes.text());
 
-      const daily = await dailyRes.json();
-      const monthly = await monthlyRes.json();
+      const daily = (await dailyRes.json()) as AlphaDailyPoint[];
+      const monthly = (await monthlyRes.json()) as AlphaMonthlyPoint[];
       const overview = overviewRes.ok ? await overviewRes.json() : null;
       const profile = etfRes.ok ? await etfRes.json() : null;
 
-      const chartSeries: ChartPoint[] = (daily as any[]).slice(-120).map((point) => ({
+      const filteredDaily = filterDailiesByMonths(daily, derivedTimeframe);
+      const sortedDaily = [...filteredDaily].sort(
+        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      const chartSeries: ChartPoint[] = sortedDaily.map((point) => ({
         timestamp: new Date(point.date).getTime(),
         close: point.adjustedClose
       }));
@@ -102,7 +206,9 @@ export default function CapturePage() {
           monthlies: monthly,
           profile,
           overview,
-          mode: settings.mode
+          mode: settings.mode,
+          timeframeMonths: derivedTimeframe,
+          priceScale: derivedScale
         })
       });
       if (!scoreRes.ok) throw new Error(await scoreRes.text());
@@ -178,11 +284,84 @@ export default function CapturePage() {
         >
           {loading ? t.analyzing : t.recalculate}
         </button>
+        {loading && <p className="text-xs text-white/60">画像解析とスコアを再計算しています…</p>}
         {error && <p className="text-xs text-signal-sell">{error}</p>}
       </div>
 
+      <Card className="space-y-4 text-sm">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-base font-semibold text-kachi-accent">再計算パラメータ</h3>
+          <span className="text-[10px] text-white/50">
+            {analysis
+              ? paramsDirty
+                ? '解析結果からカスタマイズされています'
+                : `解析推奨: ${analysis.timeframe} / ${analysis.x_axis.scale}`
+              : '解析後に推奨値が設定されます'}
+          </span>
+        </div>
+        <div>
+          <div className="flex items-center justify-between text-xs text-white/60">
+            <span>表示期間</span>
+            <span>{timeframeMonths}ヶ月</span>
+          </div>
+          <input
+            type="range"
+            min={TIMEFRAME_MIN}
+            max={TIMEFRAME_MAX}
+            value={timeframeMonths}
+            disabled={loading}
+            onChange={(event) => {
+              const value = clampTimeframe(Number(event.target.value));
+              setTimeframeMonths(value);
+              syncDirty(value, priceScale);
+            }}
+            className="mt-2 w-full cursor-pointer accent-kachi-accent disabled:cursor-not-allowed"
+          />
+        </div>
+        <div className="space-y-2">
+          <span className="text-xs text-white/60">価格スケール</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                const nextScale: 'linear' | 'log' = 'linear';
+                setPriceScale(nextScale);
+                syncDirty(timeframeMonths, nextScale);
+              }}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-kachi-accent ${
+                priceScale === 'linear'
+                  ? 'bg-kachi-accent text-kachi-shade shadow'
+                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+              } ${loading ? 'cursor-not-allowed opacity-60 hover:bg-white/10' : ''}`}
+            >
+              リニア
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => {
+                const nextScale: 'linear' | 'log' = 'log';
+                setPriceScale(nextScale);
+                syncDirty(timeframeMonths, nextScale);
+              }}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-kachi-accent ${
+                priceScale === 'log'
+                  ? 'bg-kachi-accent text-kachi-shade shadow'
+                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+              } ${loading ? 'cursor-not-allowed opacity-60 hover:bg-white/10' : ''}`}
+            >
+              対数
+            </button>
+          </div>
+        </div>
+        {analysis && paramsDirty && (
+          <p className="text-[10px] text-white/50">解析結果と異なる設定で再計算します。</p>
+        )}
+      </Card>
+
       {score && (
-        <Card className="space-y-4">
+        <Card className={`space-y-4 ${loading ? 'opacity-70' : ''}`}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold">{symbol}</p>
@@ -214,12 +393,89 @@ export default function CapturePage() {
               </ul>
             </div>
           </div>
+          {loading && <p className="text-[10px] text-white/50">スコアを更新しています…</p>}
         </Card>
       )}
 
       {chart.length > 0 && (
-        <Card>
-          <ChartCanvas series={chart} />
+        <Card className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-white/60">
+            <span>
+              {analysis
+                ? `${formatChartTypeLabel(analysis.chart_type)} (${analysis.timeframe})`
+                : 'チャート'}
+            </span>
+            <span>スケール: {priceScale === 'log' ? '対数' : 'リニア'}</span>
+          </div>
+          <ChartCanvas series={chart} chartType={analysis?.chart_type} scale={priceScale} />
+          {loading && <p className="text-[10px] text-white/50">チャートを更新中…</p>}
+        </Card>
+      )}
+
+      {analysis && (
+        <Card className="space-y-3 text-sm">
+          <div className="flex flex-wrap gap-2 text-xs text-white/80">
+            <span className="rounded-full bg-white/10 px-3 py-1 font-semibold text-white">
+              {formatChartTypeLabel(analysis.chart_type)}
+            </span>
+            <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
+              推定タイムフレーム: {analysis.timeframe || '---'}
+            </span>
+            <span className="rounded-full bg-white/5 px-3 py-1 text-white/70">
+              軸スケール: X {analysis.x_axis.scale} / Y {analysis.y_axis.scale}
+            </span>
+          </div>
+          <div>
+            <h3 className="text-xs text-white/60">注釈</h3>
+            {analysis.annotations.length ? (
+              <ul className="mt-2 flex flex-wrap gap-2">
+                {analysis.annotations.map((item, index) => (
+                  <li
+                    key={`${item.type}-${index}`}
+                    className="rounded-full bg-white/10 px-3 py-1 text-[11px] text-white/80"
+                  >
+                    {item.type}
+                    {item.period ? ` (${item.period})` : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-[11px] text-white/50">検出された注釈はありません。</p>
+            )}
+          </div>
+          <div className="grid gap-3 text-[11px] sm:grid-cols-2">
+            <div>
+              <h3 className="text-xs text-white/60">Claims</h3>
+              {analysis.claims.length ? (
+                <ul className="mt-1 space-y-1 text-white/80">
+                  {analysis.claims.map((claim, index) => {
+                    const normalized = claim.confidence <= 1 ? claim.confidence * 100 : claim.confidence;
+                    const confidence = `${Math.round(Math.max(0, Math.min(normalized, 100)))}%`;
+                    return (
+                      <li key={`${claim.text}-${index}`}>
+                        • {claim.text}{' '}
+                        <span className="text-white/50">({confidence})</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="mt-1 text-white/50">主張は抽出されませんでした。</p>
+              )}
+            </div>
+            <div>
+              <h3 className="text-xs text-white/60">Pitfalls</h3>
+              {analysis.pitfalls.length ? (
+                <ul className="mt-1 space-y-1 text-white/80">
+                  {analysis.pitfalls.map((item, index) => (
+                    <li key={`${item}-${index}`}>• {item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-white/50">特筆すべき注意点はありません。</p>
+              )}
+            </div>
+          </div>
         </Card>
       )}
 
