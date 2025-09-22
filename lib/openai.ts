@@ -3,6 +3,100 @@ import type { AdvicePayload, PhotoAnalysis } from '@/lib/types';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const findJsonPayload = (node: unknown): unknown | undefined => {
+  if (node == null) {
+    return undefined;
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const result = findJsonPayload(item);
+      if (result !== undefined) {
+        return result;
+      }
+    }
+    return undefined;
+  }
+
+  if (!isObject(node)) {
+    return undefined;
+  }
+
+  if ('json' in node && (node as { json?: unknown }).json != null) {
+    return (node as { json?: unknown }).json;
+  }
+
+  if ('parsed' in node && (node as { parsed?: unknown }).parsed != null) {
+    return (node as { parsed?: unknown }).parsed;
+  }
+
+  if ('json_schema' in node) {
+    const result = findJsonPayload((node as { json_schema?: unknown }).json_schema);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  if ('content' in node) {
+    const result = findJsonPayload((node as { content?: unknown }).content);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    const result = findJsonPayload(value);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  return undefined;
+};
+
+const findTextPayload = (node: unknown): string | undefined => {
+  if (node == null) {
+    return undefined;
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const result = findTextPayload(item);
+      if (result !== undefined) {
+        return result;
+      }
+    }
+    return undefined;
+  }
+
+  if (!isObject(node)) {
+    return undefined;
+  }
+
+  if (typeof (node as { text?: unknown }).text === 'string') {
+    return (node as { text?: string }).text;
+  }
+
+  if ('content' in node) {
+    const result = findTextPayload((node as { content?: unknown }).content);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    const result = findTextPayload(value);
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  return undefined;
+};
+
 interface CallResponsesOptions {
   apiKey?: string;
   expectsJson?: boolean;
@@ -32,20 +126,14 @@ async function callResponses<T>(
   }
 
   const data = await response.json();
-  const firstMessage = data.output?.[0]?.content?.[0];
-  if (!firstMessage) {
-    throw new Error('OpenAI応答が不正です');
+  const output = data.output ?? data;
+
+  const jsonPayload = findJsonPayload(output);
+  if (jsonPayload !== undefined) {
+    return jsonPayload as T;
   }
 
-  if ('json' in firstMessage && firstMessage.json) {
-    return firstMessage.json as T;
-  }
-
-  const textPayload =
-    typeof firstMessage === 'object' && firstMessage !== null && 'text' in firstMessage
-      ? (firstMessage as { text?: unknown }).text
-      : undefined;
-
+  const textPayload = findTextPayload(output);
   if (typeof textPayload !== 'string') {
     throw new Error('OpenAI応答が不正です');
   }
@@ -138,7 +226,7 @@ export async function analyzePhoto({
           role: 'system',
           content: [
             {
-              type: 'text',
+              type: 'input_text',
               text: 'あなたは投資教育用のチャート解析アシスタントです。チャート画像から定義済みスキーマに沿って厳密なJSONを返却してください。'
             }
           ]
@@ -148,7 +236,7 @@ export async function analyzePhoto({
           content: [
             { type: 'input_image', image_url: image },
             {
-              type: 'text',
+              type: 'input_text',
               text: `補足ヒント: ${JSON.stringify(hints ?? {})}`
             }
           ]
@@ -197,7 +285,7 @@ export async function formatAdvice({
           role: 'system',
           content: [
             {
-              type: 'text',
+              type: 'input_text',
               text: 'あなたは投資教育アシスタント。売買指示は出さず、提供されたシグナルを教育的に説明します。反対要因と免責を必ず含めてください。'
             }
           ]
@@ -206,7 +294,7 @@ export async function formatAdvice({
           role: 'user',
           content: [
             {
-              type: 'text',
+              type: 'input_text',
               text: JSON.stringify({ decision, reasons, counters, nextSteps })
             }
           ]
@@ -236,20 +324,20 @@ export async function chatEducator({
           role: 'system',
           content: [
             {
-              type: 'text',
+              type: 'input_text',
               text: 'あなたは長期投資教育アシスタント。特定の売買指示は出さず、データとリスクを比較しながら解説してください。常に免責を添えてください。'
             }
           ]
         },
         ...messages.map((message) => ({
           role: message.role,
-          content: [{ type: 'text', text: message.content }]
+          content: [{ type: 'input_text', text: message.content }]
         })),
         {
           role: 'user',
           content: [
             {
-              type: 'text',
+              type: 'input_text',
               text: '最後に短い免責を追加してください。'
             }
           ]
