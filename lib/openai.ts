@@ -247,6 +247,7 @@ export async function analyzePhoto({
           type: 'json_schema',
           json_schema: { name: 'chart_payload', schema }
         }
+        format: { type: 'json_schema', json_schema: { name: 'chart_payload', schema } }
       }
     },
     { apiKey, expectsJson: true }
@@ -308,6 +309,7 @@ export async function formatAdvice({
           type: 'json_schema',
           json_schema: { name: 'advice_payload', schema }
         }
+        format: { type: 'json_schema', json_schema: { name: 'advice_payload', schema } }
       }
     },
     { apiKey, expectsJson: true }
