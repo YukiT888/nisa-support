@@ -8,6 +8,13 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={clsx('rounded-2xl bg-kachi-surface/90 p-4 shadow-kachi backdrop-blur', className)}>{children}</div>
+    <div
+      className={clsx(
+        'rounded-2xl border border-white/10 bg-kachi-tint/80 p-4 shadow-kachi backdrop-blur',
+        className
+      )}
+    >
+      {children}
+    </div>
   );
 }
