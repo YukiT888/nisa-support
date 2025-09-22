@@ -243,6 +243,10 @@ export async function analyzePhoto({
         }
       ],
       text: {
+        format: {
+          type: 'json_schema',
+          json_schema: { name: 'chart_payload', schema }
+        }
         format: { type: 'json_schema', json_schema: { name: 'chart_payload', schema } }
       }
     },
@@ -301,6 +305,10 @@ export async function formatAdvice({
         }
       ],
       text: {
+        format: {
+          type: 'json_schema',
+          json_schema: { name: 'advice_payload', schema }
+        }
         format: { type: 'json_schema', json_schema: { name: 'advice_payload', schema } }
       }
     },
