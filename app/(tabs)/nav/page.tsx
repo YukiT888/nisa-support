@@ -26,11 +26,19 @@ export default function NavPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!ready || !settings.alphaVantageApiKey) return;
+    if (!ready) return;
+
+    const apiKey = settings.alphaVantageApiKey;
+    if (!apiKey) {
+      setError('Alpha Vantage API key is required to load recommendations.');
+      return;
+    }
+
+    setError(null);
     const controller = new AbortController();
     const fetchData = async () => {
       try {
-        const res = await fetch(`/api/recommend?apiKey=${encodeURIComponent(settings.alphaVantageApiKey)}&mode=${settings.mode}`, {
+        const res = await fetch(`/api/recommend?apiKey=${encodeURIComponent(apiKey)}&mode=${settings.mode}`, {
           signal: controller.signal
         });
         if (!res.ok) throw new Error(await res.text());
