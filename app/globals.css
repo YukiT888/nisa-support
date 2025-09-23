@@ -8,6 +8,8 @@
 
 body {
   @apply bg-kachi text-kachi-textdark min-h-screen;
+  font-family: 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Hiragino Kaku Gothic Pro',
+    'Yu Gothic', 'Yu Gothic UI', 'YuGothic', 'Meiryo', sans-serif;
 }
 
 a {
