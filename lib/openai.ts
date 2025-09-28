@@ -163,7 +163,10 @@ async function callResponses<T>(
 
   try {
     const response = await client.responses.create(finalPayload);
-    const output = response.output ?? response;
+    const output =
+      typeof response === 'object' && response !== null && 'output' in response
+        ? (response as { output?: unknown }).output ?? response
+        : response;
 
     const jsonPayload = findJsonPayload(output);
     if (jsonPayload !== undefined) {
