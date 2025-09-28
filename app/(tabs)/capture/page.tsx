@@ -89,6 +89,12 @@ interface ChartPoint {
 export default function CapturePage() {
   const { settings, ready } = useAppSettings();
   const [preview, setPreview] = useState<string | null>(null);
+  const [previewMeta, setPreviewMeta] = useState<{
+    width: number;
+    height: number;
+    originalWidth: number;
+    originalHeight: number;
+  } | null>(null);
   const [analysis, setAnalysis] = useState<PhotoAnalysis | null>(null);
   const [score, setScore] = useState<ScoreResult | null>(null);
   const [advice, setAdvice] = useState<AdvicePayload | null>(null);
@@ -122,6 +128,7 @@ export default function CapturePage() {
       setAdvice(null);
       setChart([]);
       setSymbol(null);
+      setPreviewMeta(null);
       const defaultMonths = clampTimeframe(6);
       setTimeframeMonths(defaultMonths);
       setPriceScale('linear');
@@ -131,9 +138,16 @@ export default function CapturePage() {
 
       const processed = await processImageFile(file);
       setPreview(processed.dataUrl);
+      setPreviewMeta({
+        width: processed.width,
+        height: processed.height,
+        originalWidth: processed.originalWidth,
+        originalHeight: processed.originalHeight
+      });
     } catch (err) {
       console.error(err);
       setError('画像の処理中に問題が発生しました');
+      setPreviewMeta(null);
     }
   };
 
@@ -149,6 +163,7 @@ export default function CapturePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: preview,
+          imageMeta: previewMeta ?? undefined,
           hints: analysis ? { timeframe: analysis.timeframe } : {},
           openAIApiKey: settings.openAIApiKey,
           alphaApiKey: settings.alphaVantageApiKey

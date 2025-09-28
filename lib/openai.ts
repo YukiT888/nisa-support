@@ -1,7 +1,6 @@
+import OpenAI from 'openai';
 import { unstable_noStore as noStore } from 'next/cache';
 import type { AdvicePayload, PhotoAnalysis } from '@/lib/types';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
 const GPT5_MODEL_PREFIX = /^gpt-5/;
 
@@ -26,6 +25,19 @@ const VISION_MODEL = ensureGpt5Model(
   process.env.OPENAI_MODEL_VISION ?? DEFAULT_MODEL,
   'OPENAI_MODEL_VISION'
 );
+
+const defaultApiKey = process.env.OPENAI_API_KEY;
+const defaultClient = defaultApiKey ? new OpenAI({ apiKey: defaultApiKey }) : null;
+
+const getClient = (apiKey?: string): OpenAI => {
+  if (apiKey) {
+    return new OpenAI({ apiKey });
+  }
+  if (defaultClient) {
+    return defaultClient;
+  }
+  throw new Error('OpenAI APIキーが設定されていません');
+};
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -103,119 +115,124 @@ interface CallResponsesOptions {
   apiKey?: string;
   expectsJson?: boolean;
 }
+type ResponsesCreateParams = Parameters<OpenAI['responses']['create']>[0];
+type OpenAIResponse = Awaited<ReturnType<OpenAI['responses']['create']>>;
 
-const collectModalities = (content: unknown[]): Set<'text' | 'vision'> => {
-  const modes = new Set<'text' | 'vision'>();
+interface CallResponsesResult<T> {
+  data: T;
+  response: OpenAIResponse;
+}
 
-  for (const item of content) {
-    if (!isObject(item)) continue;
+const describeValue = (value: unknown): string => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return `array(len=${value.length})`;
+  return typeof value;
+};
 
-    const type = (item as { type?: unknown }).type;
-    if (type === 'input_image' || type === 'image' || type === 'image_url') {
-      modes.add('vision');
-    } else {
-      modes.add('text');
-    }
-
-    if ('content' in item && Array.isArray((item as { content?: unknown }).content)) {
-      for (const nested of collectModalities((item as { content: unknown[] }).content)) {
-        modes.add(nested);
-      }
-    }
-  }
-
-  return modes;
+const describePayloadKeys = (payload: ResponsesCreateParams): Record<string, string> => {
+  if (!isObject(payload)) return {};
+  const entries = Object.entries(payload).map(([key, value]) => [key, describeValue(value)]);
+  return Object.fromEntries(entries);
 };
 
 async function callResponses<T>(
-  payload: Record<string, unknown>,
+  payload: ResponsesCreateParams,
   { apiKey, expectsJson = true }: CallResponsesOptions = {},
-): Promise<T> {
+): Promise<CallResponsesResult<T>> {
   noStore();
-  const key = apiKey ?? process.env.OPENAI_API_KEY;
-  if (!key) {
-    throw new Error('OpenAI APIキーが設定されていません');
+
+  const finalPayload: ResponsesCreateParams = { ...payload };
+
+  if ('messages' in finalPayload && 'input' in finalPayload) {
+    throw new Error('payload で messages と input を同時に指定することはできません');
   }
 
-  // === コンフリクト解消: モデル検証・デフォルト設定 ===
-  if (typeof payload.model === 'string') {
-    payload.model = ensureGpt5Model(payload.model, 'payload.model');
-  } else if (payload.model == null) {
-    payload.model = TEXT_MODEL;
+  if ('modalities' in finalPayload) {
+    delete (finalPayload as { modalities?: unknown }).modalities;
+  }
+
+  if (typeof finalPayload.model === 'string') {
+    finalPayload.model = ensureGpt5Model(finalPayload.model, 'payload.model');
+  } else if (finalPayload.model == null) {
+    finalPayload.model = TEXT_MODEL;
   } else {
     throw new Error('payload.model はGPT-5ファミリーのモデル名文字列で指定してください');
   }
-  // === ここまで ===
 
-  if (!('modalities' in payload)) {
-    const input = payload.input;
-    if (Array.isArray(input)) {
-      const derived = new Set<'text' | 'vision'>();
-      for (const message of input) {
-        if (!isObject(message)) continue;
-        const content = (message as { content?: unknown }).content;
-        if (Array.isArray(content)) {
-          for (const mode of collectModalities(content)) {
-            derived.add(mode);
-          }
-        }
-      }
-      if (expectsJson || derived.has('text')) derived.add('text');
-      if (derived.size > 0) {
-        payload.modalities = Array.from(derived);
-      }
-    } else if (expectsJson) {
-      payload.modalities = ['text'];
-    }
-  }
-
-  if (expectsJson) {
-    const textConfig = payload.text;
-    if (textConfig === undefined) {
-      payload.text = { format: 'json' };
-    } else if (!isObject(textConfig)) {
-      throw new Error('payload.text はオブジェクトで指定してください');
-    } else if (typeof (textConfig as { format?: unknown }).format !== 'string') {
-      (textConfig as Record<string, unknown>).format = 'json';
-    }
-  }
-
-  const response = await fetch(OPENAI_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`OpenAI APIエラー: ${response.status} ${text}`);
-  }
-
-  const data = await response.json();
-  const output = data.output ?? data;
-
-  const jsonPayload = findJsonPayload(output);
-  if (jsonPayload !== undefined) {
-    return jsonPayload as T;
-  }
-
-  const textPayload = findTextPayload(output);
-  if (typeof textPayload !== 'string') {
-    throw new Error('OpenAI応答が不正です');
-  }
-
-  if (!expectsJson) {
-    return textPayload as unknown as T;
-  }
+  const client = getClient(apiKey);
 
   try {
-    return JSON.parse(textPayload) as T;
+    const response = await client.responses.create(finalPayload);
+    const output = response.output ?? response;
+
+    const jsonPayload = findJsonPayload(output);
+    if (jsonPayload !== undefined) {
+      return { data: jsonPayload as T, response };
+    }
+
+    const textPayload = findTextPayload(output);
+    if (typeof textPayload !== 'string') {
+      throw new Error('OpenAI応答が不正です');
+    }
+
+    if (!expectsJson) {
+      return { data: textPayload as unknown as T, response };
+    }
+
+    try {
+      return { data: JSON.parse(textPayload) as T, response };
+    } catch (error) {
+      throw new Error(`OpenAIのJSON応答を解析できません: ${(error as Error).message}`);
+    }
   } catch (error) {
-    throw new Error(`OpenAIのJSON応答を解析できません: ${(error as Error).message}`);
+    if (error instanceof OpenAI.APIError) {
+      const status = error.status ?? 0;
+      const param = (error as { param?: string; error?: { param?: string } }).param
+        ?? (error as { error?: { param?: string } }).error?.param;
+      const payloadShape = describePayloadKeys(finalPayload);
+      const logDetails = {
+        status,
+        message: error.message,
+        code: (error as { code?: string }).code,
+        param,
+        payloadShape
+      };
+
+      if (status === 400 || status === 422) {
+        console.error('OpenAI API validation error', logDetails);
+      } else {
+        console.error('OpenAI API error', logDetails);
+      }
+
+      const raise = (message: string, statusCode: number) => {
+        const err = new Error(message);
+        (err as { status?: number }).status = statusCode;
+        return err;
+      };
+
+      if (param === 'modalities') {
+        throw raise('modalities は使えません。input_image ブロックで画像を渡してください。', 400);
+      }
+
+      if (param === 'model') {
+        throw raise('指定されたモデルが画像入力に対応しているか確認してください。', 400);
+      }
+
+      if (status === 400 || status === 422) {
+        throw raise('OpenAI APIに無効な入力が送信されました。payloadのキーと値の型を確認してください。', status);
+      }
+
+      throw raise(`OpenAI APIエラー: ${status} ${error.message}`, status || 500);
+    }
+
+    throw error;
   }
+}
+
+export interface AnalyzePhotoResult {
+  analysis: PhotoAnalysis;
+  responseId: string;
+  usage?: OpenAIResponse['usage'];
 }
 
 export async function analyzePhoto({
@@ -226,7 +243,7 @@ export async function analyzePhoto({
   image: string;
   hints?: { symbolText?: string; exchange?: string };
   apiKey?: string;
-}): Promise<PhotoAnalysis> {
+}): Promise<AnalyzePhotoResult> {
   const model = VISION_MODEL;
   const schema = {
     type: 'object',
@@ -286,11 +303,10 @@ export async function analyzePhoto({
     additionalProperties: false
   } as const;
 
-  return callResponses<PhotoAnalysis>(
+  const { data, response } = await callResponses<PhotoAnalysis>(
     {
       model,
       reasoning: { effort: 'medium' },
-      modalities: ['text', 'vision'],
       input: [
         {
           role: 'system',
@@ -304,11 +320,9 @@ export async function analyzePhoto({
         {
           role: 'user',
           content: [
-            {
+            { 
               type: 'input_image',
-              image_url: {
-                url: image
-              }
+              image_url: image
             },
             {
               type: 'input_text',
@@ -317,8 +331,8 @@ export async function analyzePhoto({
           ]
         }
       ],
-      text: {
-        format: 'json_schema',
+      response_format: {
+        type: 'json_schema',
         json_schema: {
           name: 'chart_payload',
           schema
@@ -327,6 +341,12 @@ export async function analyzePhoto({
     },
     { apiKey, expectsJson: true }
   );
+
+  return {
+    analysis: data,
+    responseId: response.id,
+    usage: response.usage
+  };
 }
 
 export async function formatAdvice({
@@ -356,10 +376,9 @@ export async function formatAdvice({
     additionalProperties: false
   } as const;
 
-  return callResponses<AdvicePayload>(
+  const { data } = await callResponses<AdvicePayload>(
     {
       model,
-      modalities: ['text'],
       input: [
         {
           role: 'system',
@@ -380,8 +399,8 @@ export async function formatAdvice({
           ]
         }
       ],
-      text: {
-        format: 'json_schema',
+      response_format: {
+        type: 'json_schema',
         json_schema: {
           name: 'advice_payload',
           schema
@@ -390,6 +409,7 @@ export async function formatAdvice({
     },
     { apiKey, expectsJson: true }
   );
+  return data;
 }
 
 export async function chatEducator({
@@ -400,7 +420,7 @@ export async function chatEducator({
   apiKey?: string;
 }): Promise<string> {
   const model = TEXT_MODEL;
-  const response = await callResponses<string>(
+  const { data } = await callResponses<string>(
     {
       model,
       input: [
@@ -430,5 +450,5 @@ export async function chatEducator({
     },
     { apiKey, expectsJson: false }
   );
-  return response?.trim() ? response : '申し訳ありません、回答を生成できませんでした。';
+  return data?.trim() ? data : '申し訳ありません、回答を生成できませんでした。';
 }
