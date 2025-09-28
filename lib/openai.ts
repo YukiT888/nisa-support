@@ -31,23 +31,17 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
 const findJsonPayload = (node: unknown): unknown | undefined => {
-  if (node == null) {
-    return undefined;
-  }
+  if (node == null) return undefined;
 
   if (Array.isArray(node)) {
     for (const item of node) {
       const result = findJsonPayload(item);
-      if (result !== undefined) {
-        return result;
-      }
+      if (result !== undefined) return result;
     }
     return undefined;
   }
 
-  if (!isObject(node)) {
-    return undefined;
-  }
+  if (!isObject(node)) return undefined;
 
   if ('json' in node && (node as { json?: unknown }).json != null) {
     return (node as { json?: unknown }).json;
@@ -59,46 +53,34 @@ const findJsonPayload = (node: unknown): unknown | undefined => {
 
   if ('json_schema' in node) {
     const result = findJsonPayload((node as { json_schema?: unknown }).json_schema);
-    if (result !== undefined) {
-      return result;
-    }
+    if (result !== undefined) return result;
   }
 
   if ('content' in node) {
     const result = findJsonPayload((node as { content?: unknown }).content);
-    if (result !== undefined) {
-      return result;
-    }
+    if (result !== undefined) return result;
   }
 
   for (const value of Object.values(node)) {
     const result = findJsonPayload(value);
-    if (result !== undefined) {
-      return result;
-    }
+    if (result !== undefined) return result;
   }
 
   return undefined;
 };
 
 const findTextPayload = (node: unknown): string | undefined => {
-  if (node == null) {
-    return undefined;
-  }
+  if (node == null) return undefined;
 
   if (Array.isArray(node)) {
     for (const item of node) {
       const result = findTextPayload(item);
-      if (result !== undefined) {
-        return result;
-      }
+      if (result !== undefined) return result;
     }
     return undefined;
   }
 
-  if (!isObject(node)) {
-    return undefined;
-  }
+  if (!isObject(node)) return undefined;
 
   if (typeof (node as { text?: unknown }).text === 'string') {
     return (node as { text?: string }).text;
@@ -106,16 +88,12 @@ const findTextPayload = (node: unknown): string | undefined => {
 
   if ('content' in node) {
     const result = findTextPayload((node as { content?: unknown }).content);
-    if (result !== undefined) {
-      return result;
-    }
+    if (result !== undefined) return result;
   }
 
   for (const value of Object.values(node)) {
     const result = findTextPayload(value);
-    if (result !== undefined) {
-      return result;
-    }
+    if (result !== undefined) return result;
   }
 
   return undefined;
@@ -130,9 +108,7 @@ const collectModalities = (content: unknown[]): Set<'text' | 'vision'> => {
   const modes = new Set<'text' | 'vision'>();
 
   for (const item of content) {
-    if (!isObject(item)) {
-      continue;
-    }
+    if (!isObject(item)) continue;
 
     const type = (item as { type?: unknown }).type;
     if (type === 'input_image' || type === 'image' || type === 'image_url') {
@@ -161,6 +137,7 @@ async function callResponses<T>(
     throw new Error('OpenAI APIキーが設定されていません');
   }
 
+  // === コンフリクト解消: モデル検証・デフォルト設定 ===
   if (typeof payload.model === 'string') {
     payload.model = ensureGpt5Model(payload.model, 'payload.model');
   } else if (payload.model == null) {
@@ -168,15 +145,14 @@ async function callResponses<T>(
   } else {
     throw new Error('payload.model はGPT-5ファミリーのモデル名文字列で指定してください');
   }
+  // === ここまで ===
 
   if (!('modalities' in payload)) {
     const input = payload.input;
     if (Array.isArray(input)) {
       const derived = new Set<'text' | 'vision'>();
       for (const message of input) {
-        if (!isObject(message)) {
-          continue;
-        }
+        if (!isObject(message)) continue;
         const content = (message as { content?: unknown }).content;
         if (Array.isArray(content)) {
           for (const mode of collectModalities(content)) {
@@ -184,11 +160,7 @@ async function callResponses<T>(
           }
         }
       }
-
-      if (expectsJson || derived.has('text')) {
-        derived.add('text');
-      }
-
+      if (expectsJson || derived.has('text')) derived.add('text');
       if (derived.size > 0) {
         payload.modalities = Array.from(derived);
       }
@@ -341,13 +313,11 @@ export async function analyzePhoto({
           ]
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'chart_payload',
-            schema
-          }
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'chart_payload',
+          schema
         }
       }
     },
@@ -406,13 +376,11 @@ export async function formatAdvice({
           ]
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'advice_payload',
-            schema
-          }
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'advice_payload',
+          schema
         }
       }
     },
