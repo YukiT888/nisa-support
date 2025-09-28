@@ -234,7 +234,12 @@ export async function analyzePhoto({
         {
           role: 'user',
           content: [
-            { type: 'input_image', image_url: image },
+            {
+              type: 'input_image',
+              image_url: {
+                url: image
+              }
+            },
             {
               type: 'input_text',
               text: `補足ヒント: ${JSON.stringify(hints ?? {})}`
