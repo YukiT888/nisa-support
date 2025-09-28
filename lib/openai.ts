@@ -171,8 +171,12 @@ async function callResponses<T>(
 
   if (expectsJson) {
     const textConfig = payload.text;
-    if (!isObject(textConfig) || !('format' in (textConfig as Record<string, unknown>))) {
+    if (textConfig === undefined) {
       payload.text = { format: 'json' };
+    } else if (!isObject(textConfig)) {
+      throw new Error('payload.text はオブジェクトで指定してください');
+    } else if (typeof (textConfig as { format?: unknown }).format !== 'string') {
+      (textConfig as Record<string, unknown>).format = 'json';
     }
   }
 
@@ -313,8 +317,8 @@ export async function analyzePhoto({
           ]
         }
       ],
-      response_format: {
-        type: 'json_schema',
+      text: {
+        format: 'json_schema',
         json_schema: {
           name: 'chart_payload',
           schema
@@ -376,8 +380,8 @@ export async function formatAdvice({
           ]
         }
       ],
-      response_format: {
-        type: 'json_schema',
+      text: {
+        format: 'json_schema',
         json_schema: {
           name: 'advice_payload',
           schema
