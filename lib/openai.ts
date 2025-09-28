@@ -3,6 +3,30 @@ import type { AdvicePayload, PhotoAnalysis } from '@/lib/types';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
+const GPT5_MODEL_PREFIX = /^gpt-5/;
+
+const ensureGpt5Model = (model: string, source: string): string => {
+  if (!GPT5_MODEL_PREFIX.test(model)) {
+    throw new Error(
+      `${source} はGPT-5ファミリーのモデル名を指定してください (受領値: "${model}")`
+    );
+  }
+  return model;
+};
+
+const DEFAULT_MODEL = ensureGpt5Model(
+  process.env.OPENAI_MODEL ?? 'gpt-5.0-mini',
+  'OPENAI_MODEL'
+);
+const TEXT_MODEL = ensureGpt5Model(
+  process.env.OPENAI_MODEL_TEXT ?? DEFAULT_MODEL,
+  'OPENAI_MODEL_TEXT'
+);
+const VISION_MODEL = ensureGpt5Model(
+  process.env.OPENAI_MODEL_VISION ?? DEFAULT_MODEL,
+  'OPENAI_MODEL_VISION'
+);
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -102,6 +126,31 @@ interface CallResponsesOptions {
   expectsJson?: boolean;
 }
 
+const collectModalities = (content: unknown[]): Set<'text' | 'vision'> => {
+  const modes = new Set<'text' | 'vision'>();
+
+  for (const item of content) {
+    if (!isObject(item)) {
+      continue;
+    }
+
+    const type = (item as { type?: unknown }).type;
+    if (type === 'input_image' || type === 'image' || type === 'image_url') {
+      modes.add('vision');
+    } else {
+      modes.add('text');
+    }
+
+    if ('content' in item && Array.isArray((item as { content?: unknown }).content)) {
+      for (const nested of collectModalities((item as { content: unknown[] }).content)) {
+        modes.add(nested);
+      }
+    }
+  }
+
+  return modes;
+};
+
 async function callResponses<T>(
   payload: Record<string, unknown>,
   { apiKey, expectsJson = true }: CallResponsesOptions = {},
@@ -111,6 +160,50 @@ async function callResponses<T>(
   if (!key) {
     throw new Error('OpenAI APIキーが設定されていません');
   }
+
+  if (typeof payload.model === 'string') {
+    payload.model = ensureGpt5Model(payload.model, 'payload.model');
+  } else if (payload.model == null) {
+    payload.model = TEXT_MODEL;
+  } else {
+    throw new Error('payload.model はGPT-5ファミリーのモデル名文字列で指定してください');
+  }
+
+  if (!('modalities' in payload)) {
+    const input = payload.input;
+    if (Array.isArray(input)) {
+      const derived = new Set<'text' | 'vision'>();
+      for (const message of input) {
+        if (!isObject(message)) {
+          continue;
+        }
+        const content = (message as { content?: unknown }).content;
+        if (Array.isArray(content)) {
+          for (const mode of collectModalities(content)) {
+            derived.add(mode);
+          }
+        }
+      }
+
+      if (expectsJson || derived.has('text')) {
+        derived.add('text');
+      }
+
+      if (derived.size > 0) {
+        payload.modalities = Array.from(derived);
+      }
+    } else if (expectsJson) {
+      payload.modalities = ['text'];
+    }
+  }
+
+  if (expectsJson) {
+    const textConfig = payload.text;
+    if (!isObject(textConfig) || !('format' in (textConfig as Record<string, unknown>))) {
+      payload.text = { format: 'json' };
+    }
+  }
+
   const response = await fetch(OPENAI_API_URL, {
     method: 'POST',
     headers: {
@@ -158,7 +251,7 @@ export async function analyzePhoto({
   hints?: { symbolText?: string; exchange?: string };
   apiKey?: string;
 }): Promise<PhotoAnalysis> {
-  const model = process.env.OPENAI_MODEL_VISION ?? 'gpt-4.1-mini';
+  const model = VISION_MODEL;
   const schema = {
     type: 'object',
     properties: {
@@ -221,6 +314,7 @@ export async function analyzePhoto({
     {
       model,
       reasoning: { effort: 'medium' },
+      modalities: ['text', 'vision'],
       input: [
         {
           role: 'system',
@@ -234,7 +328,12 @@ export async function analyzePhoto({
         {
           role: 'user',
           content: [
-            { type: 'input_image', image_url: image },
+            {
+              type: 'input_image',
+              image_url: {
+                url: image
+              }
+            },
             {
               type: 'input_text',
               text: `補足ヒント: ${JSON.stringify(hints ?? {})}`
@@ -269,7 +368,7 @@ export async function formatAdvice({
   nextSteps: string[];
   apiKey?: string;
 }): Promise<AdvicePayload> {
-  const model = process.env.OPENAI_MODEL_TEXT ?? 'gpt-4.1-mini';
+  const model = TEXT_MODEL;
   const schema = {
     type: 'object',
     properties: {
@@ -286,6 +385,7 @@ export async function formatAdvice({
   return callResponses<AdvicePayload>(
     {
       model,
+      modalities: ['text'],
       input: [
         {
           role: 'system',
@@ -327,7 +427,7 @@ export async function chatEducator({
   messages: { role: 'user' | 'assistant'; content: string }[];
   apiKey?: string;
 }): Promise<string> {
-  const model = process.env.OPENAI_MODEL_TEXT ?? 'gpt-4.1-mini';
+  const model = TEXT_MODEL;
   const response = await callResponses<string>(
     {
       model,
