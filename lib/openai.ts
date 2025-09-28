@@ -104,29 +104,6 @@ interface CallResponsesOptions {
   expectsJson?: boolean;
 }
 
-const collectModalities = (content: unknown[]): Set<'text' | 'vision'> => {
-  const modes = new Set<'text' | 'vision'>();
-
-  for (const item of content) {
-    if (!isObject(item)) continue;
-
-    const type = (item as { type?: unknown }).type;
-    if (type === 'input_image' || type === 'image' || type === 'image_url') {
-      modes.add('vision');
-    } else {
-      modes.add('text');
-    }
-
-    if ('content' in item && Array.isArray((item as { content?: unknown }).content)) {
-      for (const nested of collectModalities((item as { content: unknown[] }).content)) {
-        modes.add(nested);
-      }
-    }
-  }
-
-  return modes;
-};
-
 async function callResponses<T>(
   payload: Record<string, unknown>,
   { apiKey, expectsJson = true }: CallResponsesOptions = {},
@@ -147,32 +124,14 @@ async function callResponses<T>(
   }
   // === ここまで ===
 
-  if (!('modalities' in payload)) {
-    const input = payload.input;
-    if (Array.isArray(input)) {
-      const derived = new Set<'text' | 'vision'>();
-      for (const message of input) {
-        if (!isObject(message)) continue;
-        const content = (message as { content?: unknown }).content;
-        if (Array.isArray(content)) {
-          for (const mode of collectModalities(content)) {
-            derived.add(mode);
-          }
-        }
-      }
-      if (expectsJson || derived.has('text')) derived.add('text');
-      if (derived.size > 0) {
-        payload.modalities = Array.from(derived);
-      }
-    } else if (expectsJson) {
-      payload.modalities = ['text'];
-    }
-  }
-
   if (expectsJson) {
     const textConfig = payload.text;
-    if (!isObject(textConfig) || !('format' in (textConfig as Record<string, unknown>))) {
+    if (textConfig === undefined) {
       payload.text = { format: 'json' };
+    } else if (!isObject(textConfig)) {
+      throw new Error('payload.text はオブジェクトで指定してください');
+    } else if (typeof (textConfig as { format?: unknown }).format !== 'string') {
+      (textConfig as Record<string, unknown>).format = 'json';
     }
   }
 
@@ -286,7 +245,6 @@ export async function analyzePhoto({
     {
       model,
       reasoning: { effort: 'medium' },
-      modalities: ['text', 'vision'],
       input: [
         {
           role: 'system',
@@ -313,8 +271,8 @@ export async function analyzePhoto({
           ]
         }
       ],
-      response_format: {
-        type: 'json_schema',
+      text: {
+        format: 'json_schema',
         json_schema: {
           name: 'chart_payload',
           schema
@@ -355,7 +313,6 @@ export async function formatAdvice({
   return callResponses<AdvicePayload>(
     {
       model,
-      modalities: ['text'],
       input: [
         {
           role: 'system',
@@ -376,8 +333,8 @@ export async function formatAdvice({
           ]
         }
       ],
-      response_format: {
-        type: 'json_schema',
+      text: {
+        format: 'json_schema',
         json_schema: {
           name: 'advice_payload',
           schema
