@@ -234,7 +234,12 @@ export async function analyzePhoto({
         {
           role: 'user',
           content: [
-            { type: 'input_image', image_url: image },
+            {
+              type: 'input_image',
+              image_url: {
+                url: image
+              }
+            },
             {
               type: 'input_text',
               text: `補足ヒント: ${JSON.stringify(hints ?? {})}`
@@ -242,13 +247,11 @@ export async function analyzePhoto({
           ]
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'chart_payload',
-            schema
-          }
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'chart_payload',
+          schema
         }
       }
     },
@@ -306,13 +309,11 @@ export async function formatAdvice({
           ]
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'advice_payload',
-            schema
-          }
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'advice_payload',
+          schema
         }
       }
     },
