@@ -117,6 +117,7 @@ interface CallResponsesOptions {
 }
 type ResponsesCreateParams = Parameters<OpenAI['responses']['create']>[0];
 type OpenAIResponse = Awaited<ReturnType<OpenAI['responses']['create']>>;
+type OpenAIResponseUsage = OpenAIResponse extends { usage?: infer U } ? U : undefined;
 
 interface CallResponsesResult<T> {
   data: T;
@@ -235,7 +236,7 @@ async function callResponses<T>(
 export interface AnalyzePhotoResult {
   analysis: PhotoAnalysis;
   responseId: string;
-  usage?: OpenAIResponse['usage'];
+  usage?: OpenAIResponseUsage;
 }
 
 export async function analyzePhoto({
@@ -348,7 +349,7 @@ export async function analyzePhoto({
   return {
     analysis: data,
     responseId: response.id,
-    usage: response.usage
+    usage: 'usage' in response ? (response as { usage?: OpenAIResponseUsage }).usage : undefined
   };
 }
 
