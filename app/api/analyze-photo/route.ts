@@ -18,7 +18,12 @@ export async function POST(request: Request) {
     let universe: string[] = [];
 
     if (alphaApiKey) {
-      universe = await fetchListings(alphaApiKey);
+      try {
+        universe = await fetchListings(alphaApiKey);
+      } catch (error) {
+        console.error('Failed to load Alpha Vantage listings, continuing without universe', error);
+        universe = [];
+      }
     }
 
     if (hints?.symbolText) {
