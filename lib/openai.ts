@@ -1,117 +1,24 @@
 import { unstable_noStore as noStore } from 'next/cache';
 import type { AdvicePayload, PhotoAnalysis } from '@/lib/types';
 
-const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
+const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
-const findJsonPayload = (node: unknown): unknown | undefined => {
-  if (node == null) {
-    return undefined;
-  }
-
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const result = findJsonPayload(item);
-      if (result !== undefined) {
-        return result;
-      }
-    }
-    return undefined;
-  }
-
-  if (!isObject(node)) {
-    return undefined;
-  }
-
-  if ('json' in node && (node as { json?: unknown }).json != null) {
-    return (node as { json?: unknown }).json;
-  }
-
-  if ('parsed' in node && (node as { parsed?: unknown }).parsed != null) {
-    return (node as { parsed?: unknown }).parsed;
-  }
-
-  if ('json_schema' in node) {
-    const result = findJsonPayload((node as { json_schema?: unknown }).json_schema);
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  if ('content' in node) {
-    const result = findJsonPayload((node as { content?: unknown }).content);
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  for (const value of Object.values(node)) {
-    const result = findJsonPayload(value);
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return undefined;
-};
-
-const findTextPayload = (node: unknown): string | undefined => {
-  if (node == null) {
-    return undefined;
-  }
-
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const result = findTextPayload(item);
-      if (result !== undefined) {
-        return result;
-      }
-    }
-    return undefined;
-  }
-
-  if (!isObject(node)) {
-    return undefined;
-  }
-
-  if (typeof (node as { text?: unknown }).text === 'string') {
-    return (node as { text?: string }).text;
-  }
-
-  if ('content' in node) {
-    const result = findTextPayload((node as { content?: unknown }).content);
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  for (const value of Object.values(node)) {
-    const result = findTextPayload(value);
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return undefined;
-};
-
-interface CallResponsesOptions {
+interface CallChatOptions {
   apiKey?: string;
   expectsJson?: boolean;
 }
 
-async function callResponses<T>(
+async function callChat<T>(
   payload: Record<string, unknown>,
-  { apiKey, expectsJson = true }: CallResponsesOptions = {},
+  { apiKey, expectsJson = true }: CallChatOptions = {},
 ): Promise<T> {
   noStore();
   const key = apiKey ?? process.env.OPENAI_API_KEY;
   if (!key) {
     throw new Error('OpenAI APIキーが設定されていません');
   }
-  const response = await fetch(OPENAI_API_URL, {
+
+  const response = await fetch(OPENAI_CHAT_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -126,24 +33,21 @@ async function callResponses<T>(
   }
 
   const data = await response.json();
-  const output = data.output ?? data;
+  const content = data?.choices?.[0]?.message?.content;
 
-  const jsonPayload = findJsonPayload(output);
-  if (jsonPayload !== undefined) {
-    return jsonPayload as T;
-  }
-
-  const textPayload = findTextPayload(output);
-  if (typeof textPayload !== 'string') {
+  if (!expectsJson) {
+    if (typeof content === 'string') return content as unknown as T;
+    // If content is array of parts, join text parts.
+    if (Array.isArray(content)) {
+      const text = content.map((p: any) => (typeof p === 'string' ? p : p?.text)).filter(Boolean).join('\n');
+      return text as unknown as T;
+    }
     throw new Error('OpenAI応答が不正です');
   }
 
-  if (!expectsJson) {
-    return textPayload as unknown as T;
-  }
-
   try {
-    return JSON.parse(textPayload) as T;
+    const text = typeof content === 'string' ? content : JSON.stringify(content);
+    return JSON.parse(text) as T;
   } catch (error) {
     throw new Error(`OpenAIのJSON応答を解析できません: ${(error as Error).message}`);
   }
@@ -158,7 +62,8 @@ export async function analyzePhoto({
   hints?: { symbolText?: string; exchange?: string };
   apiKey?: string;
 }): Promise<PhotoAnalysis> {
-  const model = process.env.OPENAI_MODEL_VISION ?? 'gpt-4.1-mini';
+  // Use a multimodal-capable chat model by default
+  const model = process.env.OPENAI_MODEL_VISION ?? 'gpt-4o-mini';
   const schema = {
     type: 'object',
     properties: {
@@ -217,38 +122,27 @@ export async function analyzePhoto({
     additionalProperties: false
   } as const;
 
-  return callResponses<PhotoAnalysis>(
+  return callChat<PhotoAnalysis>(
     {
       model,
-      reasoning: { effort: 'medium' },
-      input: [
+      messages: [
         {
           role: 'system',
-          content: [
-            {
-              type: 'input_text',
-              text: 'あなたは投資教育用のチャート解析アシスタントです。チャート画像から定義済みスキーマに沿って厳密なJSONを返却してください。'
-            }
-          ]
+          content: 'あなたは投資教育用のチャート解析アシスタントです。チャート画像から定義済みスキーマに沿って厳密なJSONを返却してください。'
         },
         {
           role: 'user',
           content: [
-            { type: 'input_image', image_url: image },
-            {
-              type: 'input_text',
-              text: `補足ヒント: ${JSON.stringify(hints ?? {})}`
-            }
+            { type: 'text', text: `補足ヒント: ${JSON.stringify(hints ?? {})}` },
+            { type: 'image_url', image_url: { url: image } }
           ]
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'chart_payload',
-            schema
-          }
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'chart_payload',
+          schema
         }
       }
     },
@@ -269,7 +163,7 @@ export async function formatAdvice({
   nextSteps: string[];
   apiKey?: string;
 }): Promise<AdvicePayload> {
-  const model = process.env.OPENAI_MODEL_TEXT ?? 'gpt-4.1-mini';
+  const model = process.env.OPENAI_MODEL_TEXT ?? 'gpt-4o-mini';
   const schema = {
     type: 'object',
     properties: {
@@ -283,36 +177,24 @@ export async function formatAdvice({
     additionalProperties: false
   } as const;
 
-  return callResponses<AdvicePayload>(
+  return callChat<AdvicePayload>(
     {
       model,
-      input: [
+      messages: [
         {
           role: 'system',
-          content: [
-            {
-              type: 'input_text',
-              text: 'あなたは投資教育アシスタント。売買指示は出さず、提供されたシグナルを教育的に説明します。反対要因と免責を必ず含めてください。'
-            }
-          ]
+          content: 'あなたは投資教育アシスタント。売買指示は出さず、提供されたシグナルを教育的に説明します。反対要因と免責を必ず含めてください。'
         },
         {
           role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: JSON.stringify({ decision, reasons, counters, nextSteps })
-            }
-          ]
+          content: JSON.stringify({ decision, reasons, counters, nextSteps })
         }
       ],
-      text: {
-        format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'advice_payload',
-            schema
-          }
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'advice_payload',
+          schema
         }
       }
     },
@@ -327,33 +209,18 @@ export async function chatEducator({
   messages: { role: 'user' | 'assistant'; content: string }[];
   apiKey?: string;
 }): Promise<string> {
-  const model = process.env.OPENAI_MODEL_TEXT ?? 'gpt-4.1-mini';
-  const response = await callResponses<string>(
+  const model = process.env.OPENAI_MODEL_TEXT ?? 'gpt-4o-mini';
+  const response = await callChat<string>(
     {
       model,
-      input: [
+      messages: [
         {
           role: 'system',
-          content: [
-            {
-              type: 'input_text',
-              text: 'あなたは長期投資教育アシスタント。特定の売買指示は出さず、データとリスクを比較しながら解説してください。常に免責を添えてください。'
-            }
-          ]
+          content:
+            'あなたは長期投資教育アシスタント。特定の売買指示は出さず、データとリスクを比較しながら解説してください。常に免責を添えてください。'
         },
-        ...messages.map((message) => ({
-          role: message.role,
-          content: [{ type: 'input_text', text: message.content }]
-        })),
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: '最後に短い免責を追加してください。'
-            }
-          ]
-        }
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'user', content: '最後に短い免責を追加してください。' }
       ]
     },
     { apiKey, expectsJson: false }
