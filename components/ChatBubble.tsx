@@ -7,7 +7,7 @@ export function ChatBubble({ role, children }: { role: 'user' | 'assistant'; chi
       <div
         className={clsx(
           'max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-kachi',
-          isUser ? 'bg-kachi-accent text-kachi-shade' : 'bg-kachi-surface/90 text-kachi-textdark'
+          isUser ? 'bg-kachi-accent text-kachi-shade' : 'bg-kachi-surface text-kachi'
         )}
       >
         {children}
